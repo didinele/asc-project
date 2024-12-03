@@ -75,6 +75,9 @@ handle_op:
 
     cmpb $3, op
     je handle_op_delete
+
+    cmpb $4, op
+    je handle_op_defrag
 handle_op_exit:
     pop %edi
     pop %esi
@@ -200,6 +203,52 @@ handle_op_delete_loop_zero:
 
     jmp handle_op_delete_loop_zero
 handle_op_delete_loop_zero_end:
+    call print_blocks
+    jmp handle_op_exit
+
+// We'll do this by repeatedly finding blocks of 0s and shifting what's after them to the left, OVER them
+// we'll know we're done when when %ecx has reached 0 (we've traversed the entire array)
+// overall, each shift is also a full traversal at it's worst case, but that's OK!
+handle_op_defrag:
+    lea blocks, %edi
+    mov $1024, %ecx
+    mov $-1, %esi
+handle_op_defrag_loop:
+    mov $1024, %ebx
+    sub %ecx, %ebx
+
+    cmpb $0, (%edi, %ebx, 1)
+    jne handle_op_defrag_loop_no_match
+
+    cmp $-1, %esi
+    je handle_op_defrag_loop_load_esi
+handle_op_defrag_loop_continue:
+    dec %ecx
+
+    cmp $0, %ecx
+    je handle_op_defrag_loop_over
+
+    jmp handle_op_defrag_loop
+handle_op_defrag_loop_load_esi:
+    mov %ebx, %esi
+    jmp handle_op_defrag_loop_continue
+handle_op_defrag_loop_no_match:
+    cmp $-1, %esi
+    je handle_op_defrag_loop_continue
+handle_op_defrag_loop_shift:
+    movb (%edi, %ebx, 1), %al
+    movb %al, (%edi, %esi, 1)
+    movb $0, (%edi, %ebx, 1)
+
+    inc %ebx
+    inc %esi
+
+    cmp $1024, %ebx
+    jne handle_op_defrag_loop_shift
+
+    mov $-1, %esi
+    jmp handle_op_defrag_loop_continue
+handle_op_defrag_loop_over:
     call print_blocks
     jmp handle_op_exit
 
