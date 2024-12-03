@@ -95,6 +95,7 @@ handle_op_add_loop:
 
     jmp handle_op_exit
 
+// BUG: We don't return (0, 0) for not-found.
 handle_op_get:
     // Read file descriptor
     push $file_descriptor
@@ -122,7 +123,6 @@ handle_op_get_loop:
     // We found our file descriptor, load esi if it's not loaded
     cmp $-1, %esi
     je handle_op_get_loop_load_esi
-
 handle_op_get_loop_continue:
     dec %ecx
     jmp handle_op_get_loop
@@ -147,6 +147,7 @@ handle_op_get_loop_continue_no_match:
     // CALL STACK: <R.A.>
     // CALL RETURN: void
     // SIDE EFFECTS: Mutates our main file array, for each file prints out "desc: (blocks_start, blocks_end)"
+// BUG: We aren't actually ensuring contiguous blocks.
 handle_op_add_file:
     // As per call convention, we have to restore %ebx, %esi, %edi
     push %ebx
