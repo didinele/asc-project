@@ -95,7 +95,6 @@ handle_op_add_loop:
 
     jmp handle_op_exit
 
-// BUG: We don't return (0, 0) for not-found.
 handle_op_get:
     // Read file descriptor
     push $file_descriptor
@@ -125,6 +124,10 @@ handle_op_get_loop:
     je handle_op_get_loop_load_esi
 handle_op_get_loop_continue:
     dec %ecx
+
+    cmp $0, %ecx
+    je handle_op_get_loop_over
+
     jmp handle_op_get_loop
 handle_op_get_loop_load_esi:
     mov %ebx, %esi
@@ -137,6 +140,15 @@ handle_op_get_loop_continue_no_match:
 
     push %ebx
     push %esi
+    push $output_just_range_printf_format
+    call printf
+    add $12, %esp
+
+    jmp handle_op_exit
+    // Only hit if we don't find the file descriptor 
+handle_op_get_loop_over:
+    push $0
+    push $0
     push $output_just_range_printf_format
     call printf
     add $12, %esp
