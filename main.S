@@ -1,3 +1,4 @@
+// TODO: Have to rewrite to longs?
 .data
     // Our file blocks. 1kB of storage total, 1 byte blocks
     blocks: .space 1024
@@ -22,29 +23,27 @@
 .text
 .global main
 main:
-    // Zero out our blocks
     lea blocks, %edi
     mov $1024, %ecx
-zero_loop:
+main_zero_loop:
     mov $1024, %eax
     sub %ecx, %eax
 
     movb $0, (%edi, %eax, 1)
-    loop zero_loop
+    loop main_zero_loop
 
-    // Read the number of instructions
     push $instruction_count
     push $input_scanf_format
     call scanf
     add $8, %esp
 
     mov instruction_count, %ecx
-read_loop:
+main_read_loop:
     push %ecx
     call handle_op
     pop %ecx
 
-    loop read_loop
+    loop main_read_loop
 
     // Exit
     mov $1, %eax
@@ -61,7 +60,6 @@ handle_op:
     push %esi
     push %edi
 
-    // Read op
     push $op
     push $input_scanf_format
     call scanf
@@ -85,7 +83,6 @@ handle_op_exit:
     ret
 
 handle_op_add:
-    // Read the number of files
     push $file_count
     push $input_scanf_format
     call scanf
@@ -94,7 +91,7 @@ handle_op_add:
     mov file_count, %ecx
 handle_op_add_loop:
     push %ecx
-    call handle_op_add_file
+    call add_file
     pop %ecx
 
     loop handle_op_add_loop
@@ -112,12 +109,10 @@ handle_op_get:
 
     // We need to find the range and print it in the format (blocks_start, blocks_end).
 
-    // Find the start
     lea blocks, %edi
     mov $1024, %ecx
     mov $-1, %esi
 handle_op_get_loop:
-    // Use %ebx for indexing
     mov $1024, %ebx
     sub %ecx, %ebx
 
@@ -125,14 +120,13 @@ handle_op_get_loop:
     cmpb %al, (%edi, %ebx, 1)
     jne handle_op_get_loop_no_match
 
-    // We found our file descriptor, load esi if it's not loaded
     cmp $-1, %esi
     je handle_op_get_loop_load_esi
 handle_op_get_loop_continue:
     dec %ecx
 
     cmp $0, %ecx
-    je handle_op_get_loop_over
+    je handle_op_get_loop_end
 
     jmp handle_op_get_loop
 handle_op_get_loop_load_esi:
@@ -151,8 +145,7 @@ handle_op_get_loop_no_match:
     add $12, %esp
 
     jmp handle_op_exit
-    // Only hit if we don't find the file descriptor 
-handle_op_get_loop_over:
+handle_op_get_loop_end:
     push $0
     push $0
     push $output_just_range_printf_format
@@ -161,8 +154,8 @@ handle_op_get_loop_over:
 
     jmp handle_op_exit
 
+// Analogous to handle_op_get, but we want to zero out the blocks
 handle_op_delete:
-    // Analogous to handle_op_get, but we want to zero out the blocks
     push $file_descriptor
     push $input_scanf_format
     call scanf
@@ -226,7 +219,7 @@ handle_op_defrag_loop_continue:
     dec %ecx
 
     cmp $0, %ecx
-    je handle_op_defrag_loop_over
+    je handle_op_defrag_loop_end
 
     jmp handle_op_defrag_loop
 handle_op_defrag_loop_load_esi:
@@ -248,7 +241,7 @@ handle_op_defrag_loop_shift:
 
     mov $-1, %esi
     jmp handle_op_defrag_loop_continue
-handle_op_defrag_loop_over:
+handle_op_defrag_loop_end:
     call print_blocks
     jmp handle_op_exit
 
@@ -256,25 +249,23 @@ handle_op_defrag_loop_over:
     // CALL STACK: <R.A.>
     // CALL RETURN: void
     // SIDE EFFECTS: Mutates our main file array, for each file prints out "desc: (blocks_start, blocks_end)"
-handle_op_add_file:
-    // As per call convention, we have to restore %ebx, %esi, %edi
+add_file:
+    // For restoration
     push %ebx
     push %esi
     push %edi
 
-    // Read file descriptor
     push $file_descriptor
     push $input_scanf_format
     call scanf
     add $8, %esp
 
-    // Read kB size
     push $file_size
     push $input_scanf_format
     call scanf
     add $8, %esp
 
-    // As per spec, we are to treat the kB size as bits
+    // Treat the kB size as bits
     mov file_size, %eax
     xor %edx, %edx
     mov $8, %ecx
@@ -282,53 +273,50 @@ handle_op_add_file:
 
     // %eax is the number of bytes, but because we want to round up, if %edx is non-zero, we need to add 1
     cmp $0, %edx
-    je handle_op_add_file_write
+    je add_file_write
 
     inc %eax
-handle_op_add_file_write:
-    // Find %eax consecutive 0'ed blocks
+add_file_write:
     lea blocks, %edi
     mov $1024, %ecx
 
+    // Find %eax consecutive 0'ed blocks
     // Store how many we have right now in %edx
     xor %edx, %edx
     mov $-1, %esi
 
-handle_op_add_file_write_loop_begin:
-    // Use %ebx for indexing
+add_file_write_loop_begin:
     mov $1024, %ebx
     sub %ecx, %ebx
 
-    // Check if we found a 0, and if so, we want to continue
     cmpb $0, (%edi, %ebx, 1)
-    jne handle_op_add_file_write_loop_reset
+    jne add_file_write_loop_reset
 
-    // We found a 0
     inc %edx
 
     cmp $-1, %esi
-    je handle_op_add_file_write_loop_load_esi
-handle_op_add_file_write_loop_continue:
+    je add_file_write_loop_load_esi
+add_file_write_loop_continue:
     // Check if we have enough
     cmp %eax, %edx
-    je handle_op_add_file_write_found
+    je add_file_write_found
 
     dec %ecx
-    jmp handle_op_add_file_write_loop_begin
-handle_op_add_file_write_loop_reset:
+    jmp add_file_write_loop_begin
+add_file_write_loop_reset:
     mov $0, %edx
     mov $-1, %esi
 
     dec %ecx
-    jmp handle_op_add_file_write_loop_begin
-handle_op_add_file_write_loop_load_esi:
+    jmp add_file_write_loop_begin
+add_file_write_loop_load_esi:
     mov %ebx, %esi
-    jmp handle_op_add_file_write_loop_continue
-handle_op_add_file_write_found:
+    jmp add_file_write_loop_continue
+add_file_write_found:
     xor %edx, %edx
     mov file_descriptor, %dl
 
-    // We have enough, so we want to print out the range. Also, we need %eax later
+    // Restoration
     push %eax
 
     push %ebx
@@ -340,20 +328,18 @@ handle_op_add_file_write_found:
 
     pop %eax
 
-    // Now we also have to go back and write our file descriptor (from %esi to %esi + %eax)
     mov %esi, %ebx
     add %esi, %eax
 
     mov file_descriptor, %dl
-
-handle_op_add_file_write_found_loop:
+add_file_write_found_loop_begin:
     movb %dl, (%edi, %ebx, 1)
     inc %ebx
     cmp %eax, %ebx
-    je handle_op_add_file_write_found_loop_end
+    je add_file_write_found_loop_end
 
-    jmp handle_op_add_file_write_found_loop
-handle_op_add_file_write_found_loop_end:
+    jmp add_file_write_found_loop_begin
+add_file_write_found_loop_end:
     pop %edi
     pop %esi
     pop %ebx
@@ -376,7 +362,7 @@ print_blocks:
     xor %eax, %eax
     movb (%edi), %al
 
-print_blocks_loop:
+print_blocks_loop_begin:
     mov $1024, %ebx
     sub %ecx, %ebx
 
@@ -392,9 +378,9 @@ print_blocks_loop_continue:
     dec %ecx
 
     cmp $0, %ecx
-    je print_blocks_loop_over
+    je print_blocks_loop_end
 
-    jmp print_blocks_loop
+    jmp print_blocks_loop_begin
 print_blocks_loop_load_esi:
     mov %ebx, %esi
     dec %esi
@@ -432,7 +418,7 @@ print_blocks_loop_al_zero:
     movb (%edi, %ebx, 1), %al
     mov %ebx, %esi
     jmp print_blocks_loop_continue
-print_blocks_loop_over:
+print_blocks_loop_end:
     pop %edi
     pop %esi
     pop %ebx
