@@ -67,11 +67,14 @@ handle_op:
     call scanf
     add $8, %esp
 
-    cmpl $1, op
+    cmpb $1, op
     je handle_op_add
 
-    cmpl $2, op
+    cmpb $2, op
     je handle_op_get
+
+    cmpb $3, op
+    je handle_op_delete
 handle_op_exit:
     pop %edi
     pop %esi
@@ -117,7 +120,7 @@ handle_op_get_loop:
 
     // Check if we found our file descriptor, if not, if %esi is already loaded, we might be done
     cmpb %al, (%edi, %ebx, 1)
-    jne handle_op_get_loop_continue_no_match
+    jne handle_op_get_loop_no_match
 
     // We found our file descriptor, load esi if it's not loaded
     cmp $-1, %esi
@@ -132,7 +135,7 @@ handle_op_get_loop_continue:
 handle_op_get_loop_load_esi:
     mov %ebx, %esi
     jmp handle_op_get_loop_continue
-handle_op_get_loop_continue_no_match:
+handle_op_get_loop_no_match:
     cmp $-1, %esi
     je handle_op_get_loop_continue
 
@@ -153,6 +156,51 @@ handle_op_get_loop_over:
     call printf
     add $12, %esp
 
+    jmp handle_op_exit
+
+handle_op_delete:
+    // Analogous to handle_op_get, but we want to zero out the blocks
+    push $file_descriptor
+    push $input_scanf_format
+    call scanf
+    add $8, %esp
+
+    mov file_descriptor, %al
+
+    lea blocks, %edi
+    mov $1024, %ecx
+    mov $-1, %esi
+handle_op_delete_loop:
+    mov $1024, %ebx
+    sub %ecx, %ebx
+
+    cmpb %al, (%edi, %ebx, 1)
+    jne handle_op_delete_loop_no_match
+
+    cmp $-1, %esi
+    je handle_op_delete_loop_load_esi
+handle_op_delete_loop_continue:
+    dec %ecx
+
+    cmp $0, %ecx
+    je handle_op_delete_loop_zero
+
+    jmp handle_op_delete_loop
+handle_op_delete_loop_load_esi:
+    mov %ebx, %esi
+    jmp handle_op_delete_loop_continue
+handle_op_delete_loop_no_match:
+    cmp $-1, %esi
+    je handle_op_delete_loop_continue
+handle_op_delete_loop_zero:
+    movb $0, (%edi, %esi, 1)
+    inc %esi
+    cmp %ebx, %esi
+    je handle_op_delete_loop_zero_end
+
+    jmp handle_op_delete_loop_zero
+handle_op_delete_loop_zero_end:
+    call print_blocks
     jmp handle_op_exit
 
 // PROCEDURE:
@@ -258,6 +306,85 @@ handle_op_add_file_write_found_loop:
 
     jmp handle_op_add_file_write_found_loop
 handle_op_add_file_write_found_loop_end:
+    pop %edi
+    pop %esi
+    pop %ebx
+    ret
+
+// PROCEDURE
+    // CALL STACK: <R.A.>
+    // CALL RETURN: void
+    // SIDE EFFECTS: Prints all blocks in the format "descriptor: (block_start, block_end)" to stdout
+print_blocks:
+    // As per call convention, we have to restore %ebx, %esi, %edi
+    push %ebx
+    push %esi
+    push %edi
+
+    lea blocks, %edi
+    mov $1024, %ecx
+    mov $-1, %esi
+
+    xor %eax, %eax
+    movb (%edi), %al
+
+print_blocks_loop:
+    mov $1024, %ebx
+    sub %ecx, %ebx
+
+    cmpb $0, %al
+    je print_blocks_loop_al_zero
+
+    cmpb %al, (%edi, %ebx, 1)
+    jne print_blocks_loop_no_match
+
+    cmp $-1, %esi
+    je print_blocks_loop_load_esi
+print_blocks_loop_continue:
+    dec %ecx
+
+    cmp $0, %ecx
+    je print_blocks_loop_over
+
+    jmp print_blocks_loop
+print_blocks_loop_load_esi:
+    mov %ebx, %esi
+    dec %esi
+    jmp print_blocks_loop_continue
+print_blocks_loop_no_match:
+    cmp $-1, %esi
+    je print_blocks_loop_continue
+
+    movb (%edi, %ebx, 1), %al
+
+    dec %ebx
+
+    push %eax
+    push %ecx
+
+    xor %edx, %edx
+    movb (%edi, %esi, 1), %dl
+
+    push %ebx
+    push %esi
+    push %edx
+    push $output_whole_printf_format
+    call printf
+    add $16, %esp
+
+    pop %ecx
+    pop %eax
+
+    mov $-1, %esi
+    jmp print_blocks_loop_continue
+print_blocks_loop_al_zero:
+    cmpb $0, (%edi, %ebx, 1)
+    je print_blocks_loop_continue
+
+    movb (%edi, %ebx, 1), %al
+    mov %ebx, %esi
+    jmp print_blocks_loop_continue
+print_blocks_loop_over:
     pop %edi
     pop %esi
     pop %ebx
