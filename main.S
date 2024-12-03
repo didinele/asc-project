@@ -207,7 +207,6 @@ handle_op_delete_loop_zero_end:
     // CALL STACK: <R.A.>
     // CALL RETURN: void
     // SIDE EFFECTS: Mutates our main file array, for each file prints out "desc: (blocks_start, blocks_end)"
-// BUG: We aren't actually ensuring contiguous blocks.
 handle_op_add_file:
     // As per call convention, we have to restore %ebx, %esi, %edi
     push %ebx
