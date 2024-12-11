@@ -1,4 +1,3 @@
-// TODO: Have to rewrite to longs?
 .data
     // Our file blocks. 1kB of storage total, 1 byte blocks
     blocks: .space 1024
