@@ -44,7 +44,10 @@ main_read_loop:
 
     loop main_read_loop
 
-    // Exit
+    push $0
+    call fflush
+    pop %eax
+
     mov $1, %eax
     xor %ebx, %ebx
     int $0x80
@@ -145,6 +148,10 @@ handle_op_get_loop_no_match:
 
     jmp handle_op_exit
 handle_op_get_loop_end:
+    mov $1024, %ebx
+    cmpb %al, (%edi, %esi, 1)
+    je handle_op_get_loop_no_match
+
     push $0
     push $0
     push $output_just_range_printf_format
@@ -188,10 +195,13 @@ handle_op_delete_loop_no_match:
     cmp $-1, %esi
     je handle_op_delete_loop_continue
 handle_op_delete_loop_zero:
+    cmp $-1, %esi
+    je handle_op_delete_loop_zero_end
+
     movb $0, (%edi, %esi, 1)
     inc %esi
     cmp %ebx, %esi
-    je handle_op_delete_loop_zero_end
+    jge handle_op_delete_loop_zero_end
 
     jmp handle_op_delete_loop_zero
 handle_op_delete_loop_zero_end:
@@ -264,7 +274,6 @@ add_file:
     call scanf
     add $8, %esp
 
-    // Treat the kB size as bits
     mov file_size, %eax
     xor %edx, %edx
     mov $8, %ecx
@@ -283,8 +292,10 @@ add_file_write:
     // Store how many we have right now in %edx
     xor %edx, %edx
     mov $-1, %esi
-
 add_file_write_loop_begin:
+    cmp $0, %ecx
+    je add_file_write_not_found
+
     mov $1024, %ebx
     sub %ecx, %ebx
 
@@ -301,6 +312,7 @@ add_file_write_loop_continue:
     je add_file_write_found
 
     dec %ecx
+
     jmp add_file_write_loop_begin
 add_file_write_loop_reset:
     mov $0, %edx
@@ -338,6 +350,16 @@ add_file_write_found_loop_begin:
     je add_file_write_found_loop_end
 
     jmp add_file_write_found_loop_begin
+add_file_write_not_found:
+    xor %edx, %edx
+    mov file_descriptor, %dl
+
+    push $0
+    push $0
+    push %edx
+    push $output_whole_printf_format
+    call printf
+    add $16, %esp
 add_file_write_found_loop_end:
     pop %edi
     pop %esi
@@ -373,6 +395,10 @@ print_blocks_loop_begin:
 
     cmp $-1, %esi
     je print_blocks_loop_load_esi
+
+    // Edge case where our whole vector consists of one descriptor
+    cmp $1023, %ebx
+    je print_blocks_edge_case
 print_blocks_loop_continue:
     dec %ecx
 
@@ -422,3 +448,6 @@ print_blocks_loop_end:
     pop %esi
     pop %ebx
     ret
+print_blocks_edge_case:
+    inc %ebx
+    jmp print_blocks_loop_no_match
