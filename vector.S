@@ -382,7 +382,6 @@ print_blocks:
 
     xor %eax, %eax
     movb (%edi), %al
-
 print_blocks_loop_begin:
     mov $1024, %ebx
     sub %ecx, %ebx
