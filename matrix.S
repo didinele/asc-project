@@ -81,6 +81,9 @@ handle_op:
 
     cmpb $4, op
     je handle_op_defrag
+
+    cmpb $5, op
+    je handle_op_concrete
 handle_op_exit:
     pop %edi
     pop %esi
@@ -179,6 +182,39 @@ handle_op_delete_done:
     jmp handle_op_exit
 
 handle_op_defrag:
+    // To guarantee everything is compact, we need to call defrag n times, where n is the last line with an fd on it
+    lea blocks, %edi
+    mov total_size, %ecx
+handle_op_defrag_find_last:
+    cmpb $0, (%edi, %ecx, 1)
+    jne handle_op_defrag_found
+    loop handle_op_defrag_find_last
+handle_op_defrag_found:
+    cmp $0, %ecx
+    je handle_op_defrag_done
+
+    mov %ecx, %eax
+    xor %edx, %edx
+
+    divl line_size
+
+    mov %eax, %ecx
+handle_op_defrag_loop:
+    push %ecx
+    call defrag
+    pop %ecx
+
+    cmp $0, %ecx
+    je handle_op_defrag_done
+
+    dec %ecx
+    jmp handle_op_defrag_loop
+handle_op_defrag_done:
+    call print_blocks
+    jmp handle_op_exit
+
+handle_op_concrete:
+handle_op_concrete_done:
     jmp handle_op_exit
 
 // PROCEDURE:
@@ -372,6 +408,13 @@ find_empty_ret:
     // CALL STACK: <R.A.>
     // CALL RETURN: eax: start, edx: end
 find_fd:
+    cmpb $0, file_descriptor
+    jne find_fd_begin
+
+    mov $-1, %eax
+    mov $-1, %edx
+    ret
+find_fd_begin:
     push %ebp
     mov %esp, %ebp
 
@@ -554,3 +597,199 @@ print_line_ret:
 print_line_edge_case:
     inc %ebx
     jmp print_line_loop_no_match
+
+// PROCEDURE:
+    // CALL STACK: <R.A.>, int line
+    // CALL RETURN: eax=-1 if the line is full of 0s, any other value otherwise
+defrag_line:
+    // All analogue to 1d defrag
+    push %ebp
+    mov %esp, %ebp
+
+    push %ebx
+    push %esi
+    push %edi
+defrag_line_begin:
+    mov 8(%ebp), %eax
+    mull line_size
+
+    lea blocks(%eax), %edi
+    mov line_size, %ecx
+    mov $-1, %esi
+defrag_line_loop_begin:
+    mov line_size, %ebx
+    sub %ecx, %ebx
+
+    cmpb $0, (%edi, %ebx, 1)
+    jne defrag_line_loop_no_match
+
+    cmp $-1, %esi
+    je defrag_line_loop_load_esi
+defrag_line_loop_continue:
+    dec %ecx
+
+    cmp $0, %ecx
+    je defrag_line_ret
+
+    jmp defrag_line_loop_begin
+defrag_line_loop_load_esi:
+    mov %ebx, %esi
+    jmp defrag_line_loop_continue
+defrag_line_loop_no_match:
+    cmp $-1, %esi
+    je defrag_line_loop_continue
+defrag_line_loop_shift:
+    movb (%edi, %ebx, 1), %al
+    movb %al, (%edi, %esi, 1)
+    movb $0, (%edi, %ebx, 1)
+
+    inc %ebx
+    inc %esi
+
+    cmp line_size, %ebx
+    jne defrag_line_loop_shift
+
+    jmp defrag_line_begin
+defrag_line_ret:
+    pop %edi
+    pop %esi
+    pop %ebx
+    pop %ebp
+    ret
+
+// PROCEDURE:
+    // CALL STACK: <R.A.>, int line
+    // CALL RETURN: void
+// For all lines, given we're on line n:
+    // 1. Call defrag on n
+    // 2. If n + 1 doesn't exist (i.e. we're on 1023), we're done
+    // 3. Otherwise, count how many blanks (0s) we have at the end of n and how big the first file is on n + 1
+    // 4. If it's smaller or equal to our gaps, move it over and defrag n + 1 again, go back to step 3
+    // 5. If it's bigger or doesn't exist, increment n and go back to step 1
+// This needs to be called repeatedly to guarantee a full defrag
+defrag:
+    push %ebx
+    push %esi
+    push %edi
+    mov $0, %ecx
+defrag_loop_begin:
+    // Step 1
+    // Serves as both restoration and parameter
+    push %ecx
+    call defrag_line
+    pop %ecx
+
+    // Step 2, finish check
+    cmp $1023, %ecx
+    je defrag_ret
+
+    // Step 2, defrag n+1
+    mov %ecx, %eax
+    inc %eax
+
+    push %eax
+    call defrag_line
+    pop %eax
+
+    dec %eax
+    mov %eax, %ecx
+defrag_count_blank:
+    // Step 3; given we've defragged, all the 0s are at the end, so it makes the most sense to count right->left
+    mull line_size
+
+    lea blocks(%eax), %edi
+
+    mov $0, %esi
+    mov line_size, %ebx
+    dec %ebx
+defrag_count_blanks_loop:
+    cmpb $0, (%edi, %ebx, 1)
+    jne defrag_count_next
+
+    // In case it's all 0s
+    cmp $0, %ebx
+    je defrag_count_next
+
+    inc %esi
+    dec %ebx
+
+    jmp defrag_count_blanks_loop
+defrag_count_next:
+    // Restoration
+    push %ecx
+    xor %ecx, %ecx
+    movb 1024(%edi), %cl
+    movb %cl, file_descriptor
+    call find_fd
+    pop %ecx
+
+    // Check for an early Step 5, if the fd doesn't exist
+    cmp $-1, %eax
+    jne defrag_count_carry_on
+
+    inc %ecx
+    jmp defrag_loop_begin
+defrag_count_carry_on:
+    // Restoration
+    push %edx
+
+    sub %eax, %edx
+    inc %edx
+
+    // %edx is now the length of the first file on n+1
+    cmp %esi, %edx
+    // Step 4
+    jle defrag_move
+
+    // Step 5, but before that, fix the stack
+    pop %edx
+
+    inc %ecx
+    jmp defrag_loop_begin
+defrag_move:
+    // This is step 4.
+    // We know esi is the start of our empty block; edi is the start of the n line
+
+    // Let's use ebp as a pointer to the start of the matrix, since eax and edx are "absolute indeces"
+    lea blocks, %ebp
+
+    pop %edx
+
+    // esi is the number of 0s at the end of n. let's turn it into the index of the first 0
+    push %ecx
+    mov line_size, %ecx
+    sub %esi, %ecx
+    mov %ecx, %esi
+defrag_move_loop:
+    xor %ecx, %ecx
+
+    movb (%ebp, %eax, 1), %cl
+    movb %cl, (%edi, %esi, 1)
+    movb $0, (%ebp, %eax, 1)
+
+    inc %eax
+    inc %esi
+
+    cmp %edx, %eax
+    jg defrag_move_done
+
+    jmp defrag_move_loop
+defrag_move_done:
+    pop %ecx
+    // Now we need to defrag n+1
+    mov %ecx, %eax
+    inc %eax
+
+    push %eax
+    call defrag_line
+    pop %ecx
+    dec %ecx
+
+    // We need to go back to step 3. eax needs to be set back to n
+    mov %ecx, %eax
+    jmp defrag_count_blank
+defrag_ret:
+    pop %edi
+    pop %esi
+    pop %ebx
+    ret

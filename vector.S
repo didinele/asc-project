@@ -248,8 +248,7 @@ handle_op_defrag_loop_shift:
     cmp $1024, %ebx
     jne handle_op_defrag_loop_shift
 
-    mov $-1, %esi
-    jmp handle_op_defrag_loop_continue
+    jmp handle_op_defrag
 handle_op_defrag_loop_end:
     call print_blocks
     jmp handle_op_exit
