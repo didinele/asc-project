@@ -5,7 +5,7 @@
     total_size: .long 1048576
 
     // General use
-    input_scanf_format: .asciz "%d"
+    input_scanf_format: .asciz "%d\n"
     output_whole_printf_format: .asciz "%d: ((%d, %d), (%d, %d))\n"
     output_just_range_printf_format: .asciz "((%d, %d), (%d, %d))\n"
 
@@ -20,6 +20,12 @@
 
     // handle_op_add
     file_count: .byte 0
+
+    // handle_op_concrete
+    // max linux path length is 4096 (including null terminator)
+    absolute_path: .space 4096
+    file_name: .space 12 // worst case "file123.txt\0"
+    file_name_format: .asciz "file%d.txt"
 
     // add_file
     line: .long 0
@@ -99,6 +105,17 @@ handle_op_add:
     mov file_count, %ecx
 handle_op_add_loop:
     push %ecx
+
+    push $file_descriptor
+    push $input_scanf_format
+    call scanf
+    add $8, %esp
+
+    push $file_size
+    push $input_scanf_format
+    call scanf
+    add $8, %esp
+
     call add_file
     pop %ecx
 
@@ -214,7 +231,125 @@ handle_op_defrag_done:
     jmp handle_op_exit
 
 handle_op_concrete:
+    push stdin
+    push $4096
+    push $absolute_path
+    call fgets
+    add $12, %esp
+
+    lea absolute_path, %edi
+    mov $0, %ecx
+handle_op_concrete_strip_newline:
+    cmpb $0, (%edi, %ecx, 1)
+    je handle_op_concrete_done_strip
+    cmpb $'\n', (%edi, %ecx, 1)
+    jne handle_op_concrete_continue_strip
+    movb $0, (%edi, %ecx, 1)
+    jmp handle_op_concrete_done_strip
+handle_op_concrete_continue_strip:
+    inc %ecx
+    jmp handle_op_concrete_strip_newline
+handle_op_concrete_done_strip:
+    push $absolute_path
+    call chdir
+    add $4, %esp
+
+    mov $0, %ecx
+handle_op_concrete_file_loop:
+    // restoration for the end of the loop
+    push %ecx
+
+    push %ecx
+    push $file_name_format
+    push $file_name
+    call sprintf
+    add $12, %esp
+
+    push $0 // O_RDONLY
+    push $file_name
+    call open
+    add $8, %esp
+
+    cmp $-1, %eax // file doesn't exist. we're done
+    je handle_op_concrete_done
+
+    // save the fd in ebx for later
+    mov %eax, %ebx
+
+    mov $255, %ebp
+    divl %ebp
+    mov %edx, %esi
+    inc %esi
+
+    sub $96, %esp // sizeof(struct stat)
+
+    // We need to stat to check if the file exists
+    push %esp
+    push $file_name
+    call stat
+    add $8, %esp
+
+    // We need st_size, which is 44 bytes in
+    mov 44(%esp), %eax
+    add $96, %esp
+
+    cmp line_size, %eax
+    je handle_op_concrete_bad_size_or_fd
+
+    cmp $0, %eax
+    je handle_op_concrete_bad_size_or_fd
+
+    mov %eax, file_size
+    xor %eax, %eax
+    mov %esi, %eax
+    movb %al, file_descriptor
+
+    // if the fd already exists, we need to stop here
+    push %esi
+    call find_fd
+    pop %esi
+
+    cmp $-1, %eax
+    jne handle_op_concrete_bad_size_or_fd
+
+    call add_file
+
+    pop %ecx
+
+    // for later closing
+    push %ebx
+
+    inc %ecx
+    jmp handle_op_concrete_file_loop
+handle_op_concrete_bad_size_or_fd:
+    push $0
+    push $0
+    push $0
+    push $0
+    push %ebx
+    push $output_whole_printf_format
+    call printf
+    add $24, %esp
+
+    pop %ecx
+    inc %ecx
+    jmp handle_op_concrete_file_loop
 handle_op_concrete_done:
+    pop %esi // originally %ecx
+    dec %esi // otherwise we do one too many
+
+    // the last file descriptor is still in %ebx
+    push %ebx
+handle_op_concrete_close_loop:
+    // stack is set up in such a way to have all the pending fds on hand; we use %esi to loop so we don't
+    // worry about restoring it
+    call close
+    add $4, %esp
+
+    dec %esi
+    cmp $-1, %esi
+    jne handle_op_concrete_close_loop
+
     jmp handle_op_exit
 
 // PROCEDURE:
@@ -228,16 +363,6 @@ add_file:
     push %ebx
     push %esi
     push %edi
-
-    push $file_descriptor
-    push $input_scanf_format
-    call scanf
-    add $8, %esp
-
-    push $file_size
-    push $input_scanf_format
-    call scanf
-    add $8, %esp
 
     mov file_size, %eax
     xor %edx, %edx
