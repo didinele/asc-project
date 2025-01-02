@@ -294,7 +294,12 @@ handle_op_concrete_file_loop:
     mov %edx, %esi
     inc %esi
 
+    push %ecx
     push %esi
+    push $output_one_number_printf_format
+    call printf
+    add $8, %esp
+    pop %ecx
 
     sub $96, %esp // sizeof(struct stat)
 
@@ -306,8 +311,6 @@ handle_op_concrete_file_loop:
     // We need st_size, which is 44 bytes in
     mov 44(%esp), %eax
     add $96, %esp
-
-    pop %esi
 
     cmp line_size_raw, %eax
     jg handle_op_concrete_bad_size_or_fd
@@ -342,7 +345,7 @@ handle_op_concrete_bad_size_or_fd:
     push $0
     push $0
     push $0
-    push %ebx
+    push %esi
     push $output_whole_printf_format
     call printf
     add $24, %esp
