@@ -2,10 +2,12 @@
     // Our file blocks. A 1024x1024 matrix (each element representing a block)
     blocks: .space 1048576
     line_size: .long 1024
+    line_size_raw: .long 8192
     total_size: .long 1048576
 
     // General use
     input_scanf_format: .asciz "%d\n"
+    output_one_number_printf_format: .asciz "%d\n"
     output_whole_printf_format: .asciz "%d: ((%d, %d), (%d, %d))\n"
     output_just_range_printf_format: .asciz "((%d, %d), (%d, %d))\n"
 
@@ -24,8 +26,7 @@
     // handle_op_concrete
     // max linux path length is 4096 (including null terminator)
     absolute_path: .space 4096
-    file_name: .space 12 // worst case "file123.txt\0"
-    file_name_format: .asciz "file%d.txt"
+    file_name_ptr: .long 0
 
     // add_file
     line: .long 0
@@ -251,6 +252,11 @@ handle_op_concrete_continue_strip:
     jmp handle_op_concrete_strip_newline
 handle_op_concrete_done_strip:
     push $absolute_path
+    call opendir
+    add $4, %esp
+    mov %eax, %edi // DIR*
+
+    push $absolute_path
     call chdir
     add $4, %esp
 
@@ -259,19 +265,26 @@ handle_op_concrete_file_loop:
     // restoration for the end of the loop
     push %ecx
 
-    push %ecx
-    push $file_name_format
-    push $file_name
-    call sprintf
-    add $12, %esp
+    push %edi
+    call readdir
+    add $4, %esp
+
+    cmp $0, %eax // we're done
+    je handle_op_concrete_done
+
+    // save the pointer in ebp for later use
+    lea 11(%eax), %ebp // 11 is the offset to d_name in dirent, which is char[256]
+
+    // readdir includes . and .., so we need to skip those
+    cmpb $'.', (%ebp)
+    je handle_op_concrete_skips
+
+    mov %ebp, file_name_ptr
 
     push $0 // O_RDONLY
-    push $file_name
+    push file_name_ptr 
     call open
     add $8, %esp
-
-    cmp $-1, %eax // file doesn't exist. we're done
-    je handle_op_concrete_done
 
     // save the fd in ebx for later
     mov %eax, %ebx
@@ -281,11 +294,12 @@ handle_op_concrete_file_loop:
     mov %edx, %esi
     inc %esi
 
+    push %esi
+
     sub $96, %esp // sizeof(struct stat)
 
-    // We need to stat to check if the file exists
     push %esp
-    push $file_name
+    push file_name_ptr
     call stat
     add $8, %esp
 
@@ -293,8 +307,10 @@ handle_op_concrete_file_loop:
     mov 44(%esp), %eax
     add $96, %esp
 
-    cmp line_size, %eax
-    je handle_op_concrete_bad_size_or_fd
+    pop %esi
+
+    cmp line_size_raw, %eax
+    jg handle_op_concrete_bad_size_or_fd
 
     cmp $0, %eax
     je handle_op_concrete_bad_size_or_fd
@@ -333,13 +349,12 @@ handle_op_concrete_bad_size_or_fd:
 
     pop %ecx
     inc %ecx
+
+    push %ebx
     jmp handle_op_concrete_file_loop
 handle_op_concrete_done:
     pop %esi // originally %ecx
     dec %esi // otherwise we do one too many
-
-    // the last file descriptor is still in %ebx
-    push %ebx
 handle_op_concrete_close_loop:
     // stack is set up in such a way to have all the pending fds on hand; we use %esi to loop so we don't
     // worry about restoring it
@@ -351,6 +366,9 @@ handle_op_concrete_close_loop:
     jne handle_op_concrete_close_loop
 
     jmp handle_op_exit
+handle_op_concrete_skips:
+    pop %ecx
+    jmp handle_op_concrete_file_loop
 
 // PROCEDURE:
     // CALL STACK: <R.A.>
