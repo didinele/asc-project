@@ -2,7 +2,6 @@
     // Our file blocks. A 1024x1024 matrix (each element representing a block)
     blocks: .space 1048576
     line_size: .long 1024
-    line_size_raw: .long 8192
     total_size: .long 1048576
 
     // General use
@@ -312,7 +311,21 @@ handle_op_concrete_file_loop:
     mov 44(%esp), %eax
     add $96, %esp
 
-    cmp line_size_raw, %eax
+    mov $1024, %ebp
+    divl %ebp
+    cmp $0, %edx
+    je handle_op_concrete_file_loop_2
+    inc %eax
+handle_op_concrete_file_loop_2:
+    push %ecx
+    push %eax
+    push $output_one_number_printf_format
+    call printf
+    add $4, %esp
+    pop %eax
+    pop %ecx
+
+    cmp line_size, %eax
     jg handle_op_concrete_bad_size_or_fd
 
     cmp $0, %eax
@@ -444,7 +457,6 @@ add_file_found:
     pop %eax
 
     mov %eax, %ecx
-
 add_file_found_loop:
     // At this point, we have to fill blocks[eax..edx] with file_descriptor
     movb %bl, (%edi, %ecx, 1)
