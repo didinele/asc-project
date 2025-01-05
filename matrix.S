@@ -313,10 +313,7 @@ handle_op_concrete_file_loop:
 
     mov $1024, %ebp
     divl %ebp
-    cmp $0, %edx
-    je handle_op_concrete_file_loop_2
-    inc %eax
-handle_op_concrete_file_loop_2:
+
     push %ecx
     push %eax
     push $output_one_number_printf_format
