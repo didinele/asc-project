@@ -1,6 +1,6 @@
 # system-arch-project
 
-See the project [here](https://cs.unibuc.ro/~crusu/asc/Arhitectura%20Sistemelor%20de%20Calcul%20(ASC)%20-%20Tema%20Laborator%202024.pdf) (Romanian).
+See the homework assignment [here](https://cs.unibuc.ro/~crusu/asc/Arhitectura%20Sistemelor%20de%20Calcul%20(ASC)%20-%20Tema%20Laborator%202024.pdf) (Romanian).
 
 This was worth 10% of the final grade.
 
@@ -37,6 +37,6 @@ $ gcc -no-pie -m32 matrix.S -o task2
 
 `-no-pie` was probably correct for the local debug builds too, but I didn't really care for it/it ran fine without.
 
-Final grade: ?/100.
+Final grade: 100/100.
 
-Note that despite the commit history, this repository only went public on 2025-01-06, AFTER the deadline (midnight of 2025-01-05).
+This repository was made public on 2025-02-17, before the start of my second semester.
